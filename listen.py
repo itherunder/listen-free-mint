@@ -84,11 +84,12 @@ def listen_event():
 
 def handle_free_mint_event(event):
     permalink = event["asset"]["permalink"]
+    contract = event["asset"]["asset_contract"]["address"].lower()
     chain = "ethereum"
     if "matic" in permalink:
         chain = "polygon"
     created_date = event["created_date"]
-    logger.info("handle free mint event %s, %s, %s, %s", (event["id"], permalink, created_date, chain))
+    logger.info("handle free mint event %s, %s, %s, %s, %s" % (event["id"], permalink, created_date, chain, contract))
 
     if "transaction" not in event or event["transaction"] is None:
         logger.error("No transaction in event")
@@ -107,11 +108,11 @@ def handle_free_mint_event(event):
 def listen_free_mint():
     events = listen_event()
     events.sort(key=lambda x: x["id"])
+    update_meta(events[-1]["id"])
     events = filter(lambda x: x["id"] > meta["last_event_id"], events)
     events = filter(lambda x: not x["is_private"] or x["is_private"] is None, events)
     events = filter(lambda x: x["asset"]["asset_contract"]["address"].lower() not in config["black_list"], events)
     events = list(events)
-    update_meta(events[-1]["id"])
     for event in events:
         handle_free_mint_event(event)
 
