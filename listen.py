@@ -4,31 +4,43 @@ __author__ = "Zhou.Liao"
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import yaml, logging, smtplib, requests
+import yaml, logging, smtplib, requests, asyncio, json
 
 config_file, config = "config.yml", {}
-before_block_number = {"ethereum": 0, "polygon": 0}
-block_number_url = {
-    "ethereum": "https://api.etherscan.io/api?module=proxy&action=eth_blockNumber&apikey=%s" % config["etherscan_api_key"],
-    "polygon": "https://api.polygon.io/v2/meta/blocks/latest?apiKey=%s" % config["polygonscan_api_key"]
-}
+meta = json.load(open("./meta.json", "r"))
+
+def update_meta(last_event_id):
+    meta["last_event_id"] = last_event_id
+    with open("./meta.json", "w") as f:
+        f.write(json.dumps(meta))
+
+# before_block_number = {"ethereum": 0, "polygon": 0}
+# block_number_url = {
+#     "ethereum": "https://api.etherscan.io/api?module=proxy&action=eth_blockNumber&apikey=%s" % config["api_key.etherscan"],
+#     "polygon": "https://api.polygon.io/v2/meta/blocks/latest?apiKey=%s" % config["api_key,polygonscan"]
+# }
 
 def parse_config():
     global config
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-    mail_to = config["mail_to"].split("#")
-    config["mail_to"] = mail_to
+    mail_to = config["mail.to"].split("#")
+    config["mail.to"] = mail_to
     black_list = config["black_list"].split("#")
-    config["black_list"] = black_list
-    if config["etherscan_api_key"] == "":
-        logging.error("Etherscan API key is empty")
-    if config["polygonscan_api_key"] == "":
-        logging.error("Polygonscan API key is empty")
+    config["black_list"] = {_.lower(): True for _ in black_list}
+    # if config["etherscan_api_key"] == "":
+    #     logging.error("Etherscan API key is empty")
+    # if config["polygonscan_api_key"] == "":
+    #     logging.error("Polygonscan API key is empty")
+    if config["api_key.opensea"] == "":
+        logging.error("Opensea API key is empty")
+    if "params.event_type" not in config:
+        logging.error("No event_type in config")
+
     logging.info("Config loaded", config)
 
 def send_mail(message, chain):
-    if config["mail_from"] == "" or config["pswd"] == "" or config["mail_to"] == []:
+    if config["mail.from"] == "" or config["mail.pswd"] == "" or config["mail.to"] == []:
         logging.error("mail_from or password or mail_to is empty")
         return
     title = "free mint on %s!" % (chain)
@@ -37,36 +49,36 @@ def send_mail(message, chain):
     mail.attach(MIMEText(content, "plain", "utf-8"))
     mail["Subject"], mail["From"] = title, config["mail_from"]
     s = smtplib.SMTP_SSL("smtp.qq.com", 465)
-    s.login(config["mail_from"], config["pswd"])
+    s.login(config["mail.from"], config["mail.pswd"])
     for _ in config["mail_to"]:
         s.sendmail(config["mail_from"], _, mail.as_string())
 
-def get_cur_block_number(chain):
-    global before_block_number
-    res = requests.get(block_number_url if chain == 'eth' else bsc_block_number_url)
-    if res.status_code != 200:
-        log('[%s error] get block number error: wrong status code: %d' % (chain, res.status_code))
-        return before_block_number if chain == 'eth' else bsc_before_block_number
-    info = json.loads(res.text)
-    if 'status' in info and info['status'] != '1':
-        log('[%s error] get block number error: wrong block number: %d detail: %s' % (chain, before_block_number if chain == 'eth' else bsc_before_block_number, info))
-        return before_block_number if chain == 'eth' else bsc_before_block_number
+def listen_event():
+    url = "https://api.opensea.io/api/v1/events"
 
-    cur_block_number = int(info['result'], 16)
-    return cur_block_number
+    headers = {
+        "Accept": "application/json",
+        "X-API-KEY": config["opensea_api_key"]
+    }
+
+    response = requests.get(url, params=config["params"], headers=headers)
+    if response.status_code != 200:
+        logging.error("Request failed")
+        return
+    return json.loads(response.text)["asset_events"]
+
+def listen_free_mint():
+    events = listen_event()
+    events.sort(key=lambda x: x["id"])
+    events = filter(lambda x: x["id"] > meta["last_event_id"], events)
+    events = filter(lambda x: not x["is_private"], events)
+    events = filter(lambda x: x["asset"]["asset_contract"]["address"].lower() not in config["black_list"], events)
+    update_meta(events[-1]["id"])
+
+def main():
+    parse_config()
+    listen_event()
 
 if __name__ == "__main__":
-    parse_config()
-    send_mail("hello world", "ethereum")
-
-def listen_ethereum():
-    pass
-
-def listen_polygon():
-    pass
-
-block_number_url = "https://api.etherscan.io/api?module=proxy&action=eth_blockNumber&apikey=" + config["etherscan_api_key"]
-get_log_url = "https://api.etherscan.io/api?module=logs&action=getLogs&fromBlock=%d&toBlock=latest&topic0=%s&apikey=" + config["etherscan_api_key"]
-
-transfer_id = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-swap_id = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"
+    main()
+    # send_mail("hello world", "ethereum")

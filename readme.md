@@ -8,6 +8,7 @@ etherscan_api_key: "xxx"
 polygon_api_key: "xxx"
 black_list: "contract_address1#contract_address2#..." # did not listen these contract's mint event
 mint_minimum: "0.01" # the minimum mint value of the mint event
+opensea_api_key: "xxx" # opensea api key
 ```
 
 ## usage
