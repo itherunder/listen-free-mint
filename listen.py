@@ -4,7 +4,7 @@ __author__ = "Zhou.Liao"
 
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import smtplib, requests, json, yaml
+import smtplib, requests, json, yaml, sys
 from log import *
 
 config_file, config = "config.yml", {}
@@ -34,12 +34,12 @@ def parse_config():
     config["mail"]["to"] = mail_to
     black_list = config["black_list"].split("#")
     config["black_list"] = {_.lower(): True for _ in black_list}
-    # if config["etherscan_api_key"] == "":
-    #     logger.error("Etherscan API key is empty")
-    # if config["polygonscan_api_key"] == "":
-    #     logger.error("Polygonscan API key is empty")
     if "api_key" not in config or "opensea" not in config["api_key"] or config["api_key"]["opensea"] == "":
         logger.error("Opensea API key is empty")
+    if config["api_key"]["etherscan"] == "":
+        logger.error("Etherscan API key is empty")
+    if config["api_key"]["polygonscan"] == "":
+        logger.error("Polygonscan API key is empty")
     if "params" not in config or "event_type" not in config["params"] or config["params"]["event_type"] not in event_types:
         logger.error("No parmas/event_type in config")
     if "mint_minimum" in config:
@@ -108,6 +108,7 @@ def handle_free_mint_event(event):
 def listen_free_mint():
     events = listen_event()
     events.sort(key=lambda x: x["id"])
+    logger.info("last_event_id %s, and new events start_id %s" % (meta["last_event_id"], events[0]["id"]))
     update_meta(events[-1]["id"])
     events = filter(lambda x: x["id"] > meta["last_event_id"], events)
     events = filter(lambda x: not x["is_private"] or x["is_private"] is None, events)
@@ -122,4 +123,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # send_mail("hello world", "ethereum")
