@@ -21,11 +21,6 @@ event_types = {
     "approve": True,
 }
 
-query_transaction_url = {
-    "ethereum": "https://api.etherscan.io/api?module=proxy&action=eth_getTransactionByHash&apikey=%s&txhash=%s",
-    "polygon": "https://api.polygon.io/v2/meta/blocks/latest?apiKey=%s"
-}
-
 def parse_config():
     global config
     with open(config_file, "r") as f:
@@ -46,27 +41,47 @@ def parse_config():
         config["mint_minimum"] = int(float(config["mint_minimum"]) * 10**18)
     else: config["mint_minimum"] = 0 # free mint
 
-    logger.info("Config loaded %s", config)
+    logger.debug("Config loaded %s", config)
+
+parse_config()
+
+query_transaction_url = {
+    "ethereum": "https://api.etherscan.io/api?module=proxy&action=eth_getTransactionByHash&apikey=" + config["api_key"]["etherscan"] + "&txhash=%s",
+    "polygon": "https://api.polygonscan.com/api?module=proxy&action=eth_getTransactionByHash&apikey=" + config["api_key"]["polygonscan"] + "&txhash=%s"
+}
+explorer_url = {
+    "ethereum": "https://etherscan.io",
+    "polygon": "https://polygonscan.com"
+}
 
 def update_meta(last_event_id):
     meta["last_event_id"] = last_event_id
     with open("./meta.json", "w") as f:
         f.write(json.dumps(meta))
 
-def send_mail(message, chain):
+def send_mail(asset, chain):
     if config["mail"]["from"] == "" or config["mail"]["pswd"] == "" or config["mail"]["to"] == []:
         logger.error("mail_from or password or mail_to is empty")
         return
     title = "free mint on %s!" % (chain)
-    content = message
+    content = """
+    <html>
+        <body>
+            <h1><a href="%s">%s</a></h1>
+            <p>%s</p>
+            <img src="%s" />
+            <a href="%s">See Smart Contract</a>
+        </body>
+    </html>
+    """ % (asset["permalink"], asset["name"], asset["created_date"], asset["image_preview_url"], explorer_url[chain] + "/address/" + asset["asset_contract"]["address"])
     logger.info("Sending mail %s, %s", title, content)
-    # mail = MIMEMultipart()
-    # mail.attach(MIMEText(content, "plain", "utf-8"))
-    # mail["Subject"], mail["From"] = title, config["mail"]["from"]
-    # s = smtplib.SMTP_SSL("smtp.qq.com", 465)
-    # s.login(config["mail"]["from"], config["mail"]["pswd"])
-    # for _ in config["mail_to"]:
-    #     s.sendmail(config["mail"]["from"], _, mail.as_string())
+    mail = MIMEMultipart()
+    mail.attach(MIMEText(content, "html", "utf-8"))
+    mail["Subject"], mail["From"] = title, config["mail"]["from"]
+    s = smtplib.SMTP_SSL("smtp.qq.com", 465)
+    s.login(config["mail"]["from"], config["mail"]["pswd"])
+    for _ in config["mail_to"]:
+        s.sendmail(config["mail"]["from"], _, mail.as_string())
 
 def listen_event():
     url = "https://api.opensea.io/api/v1/events"
@@ -103,22 +118,27 @@ def handle_free_mint_event(event):
         return
     transaction = json.loads(response.text)["result"]
     if int(transaction["value"], 16) <= config["mint_minimum"]:
-        send_mail("%s\n%s" % (permalink, created_date), chain)
+        send_mail(event["asset"], chain)
 
 def listen_free_mint():
-    events = listen_event()
-    events.sort(key=lambda x: x["id"])
-    logger.info("last_event_id %s, and new events start_id %s" % (meta["last_event_id"], events[0]["id"]))
-    update_meta(events[-1]["id"])
-    events = filter(lambda x: x["id"] > meta["last_event_id"], events)
-    events = filter(lambda x: not x["is_private"] or x["is_private"] is None, events)
-    events = filter(lambda x: x["asset"]["asset_contract"]["address"].lower() not in config["black_list"], events)
-    events = list(events)
-    for event in events:
-        handle_free_mint_event(event)
+    while True:
+        logger.info("Start listening free mint")
+        try:
+            events = listen_event()
+            events.sort(key=lambda x: x["id"])
+            logger.debug("last_event_id %s, and new events start_id %s" % (meta["last_event_id"], events[0]["id"]))
+            logger.debug("total events %s" % (len(events)))
+            update_meta(events[-1]["id"])
+            events = filter(lambda x: x["id"] > meta["last_event_id"], events)
+            events = filter(lambda x: not x["is_private"] or x["is_private"] is None, events)
+            events = filter(lambda x: x["asset"]["asset_contract"]["address"].lower() not in config["black_list"], events)
+            events = list(events)
+            for event in events:
+                handle_free_mint_event(event)
+        except Exception as e:
+            logger.error("Exception %s" % (e))
 
 def main():
-    parse_config()
     listen_free_mint()
 
 if __name__ == "__main__":
